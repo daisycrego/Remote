@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Shelf</title>
+  <meta name="description" content="A simple tracker for what you're reading, and what's next.">
+  <meta name="theme-color" content="#f7f4ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141412" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+  <link rel="stylesheet" href="css/styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1 class="brand">Shelf</h1>
+      <div class="topbar-actions">
+        <button type="button" class="btn primary" data-action="open-add">
+          <span aria-hidden="true">+</span> Add book
+        </button>
+        <button type="button" class="icon-btn" data-action="open-menu" aria-label="Menu">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="current" class="current" aria-labelledby="current-heading"></section>
+
+    <section id="library" class="library" aria-label="Your books">
+      <div class="library-head">
+        <div id="tabs" class="tabs" role="tablist" aria-label="Shelves"></div>
+        <input type="search" id="filter" class="filter" placeholder="Filter by title or author" aria-label="Filter books" autocomplete="off">
+      </div>
+      <div id="list-summary" class="list-summary"></div>
+      <div id="list" class="list" role="tabpanel"></div>
+    </section>
+  </main>
+
+  <!-- Add a book -->
+  <dialog id="add-dialog" aria-labelledby="add-title">
+    <div class="sheet">
+      <header class="sheet-bar">
+        <h2 id="add-title">Add a book</h2>
+        <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">✕</button>
+      </header>
+      <div class="search-box">
+        <input type="search" id="search-input" placeholder="Search by title, author, or ISBN" autocomplete="off" enterkeyhint="search" autofocus aria-label="Search books">
+      </div>
+      <div id="search-results" class="results" aria-live="polite"></div>
+      <details id="manual" class="manual">
+        <summary>Can't find it? Add it by hand</summary>
+        <form id="manual-form" class="manual-form">
+          <label>Title <input name="title" required autocomplete="off"></label>
+          <label>Author <input name="creator" autocomplete="off"></label>
+          <div class="two-col">
+            <label>Pages <input name="pages" type="number" min="1" inputmode="numeric"></label>
+            <label>Year <input name="year" type="number" inputmode="numeric"></label>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn" value="want">Want to read</button>
+            <button type="submit" class="btn primary" value="doing">Start reading</button>
+          </div>
+        </form>
+      </details>
+    </div>
+  </dialog>
+
+  <!-- One book's details (rendered by js/app.js) -->
+  <dialog id="item-dialog" aria-labelledby="item-title"></dialog>
+
+  <!-- Menu -->
+  <dialog id="menu-dialog" aria-labelledby="menu-title">
+    <div class="sheet">
+      <header class="sheet-bar">
+        <h2 id="menu-title">Your data</h2>
+        <button type="button" class="icon-btn" data-action="close-dialog" aria-label="Close">✕</button>
+      </header>
+      <div class="sheet-body">
+        <p id="menu-count" class="muted"></p>
+        <p>Shelf saves everything in this browser, on this device. To move your books to another device, or to keep a backup, export a file and import it there.</p>
+        <div class="form-actions start">
+          <button type="button" class="btn" data-action="export">Export backup</button>
+          <button type="button" class="btn" data-action="import">Import backup</button>
+        </div>
+        <p class="fineprint">Importing merges books into your shelf. Nothing is deleted. Book search and covers come from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a>.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+  <div id="toast" class="toast" popover="manual" role="status"></div>
+</body>
+</html>
