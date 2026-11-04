@@ -1,10 +1,11 @@
 import { html, setHTML } from './html.js';
+import { $, actions, enableBackdropClose, formatDate, toast } from './ui.js';
 import * as store from './store.js';
+import * as meals from './meals.js';
 import { searchBooks, openLibraryUrl } from './openlibrary.js';
 import { STATUS_ORDER, TYPES } from './types.js';
 
 const T = TYPES.book;
-const $ = (sel, root = document) => root.querySelector(sel);
 
 const TABS = [
   { id: 'want', label: T.shelf.want },
@@ -24,18 +25,38 @@ const itemDialog = $('#item-dialog');
 const addDialog = $('#add-dialog');
 const menuDialog = $('#menu-dialog');
 
+// ---------------------------------------------------------------- views (#books, #meals)
+
+const VIEWS = ['books', 'meals'];
+
+function currentView() {
+  const name = location.hash.replace(/^#\/?/, '');
+  return VIEWS.includes(name) ? name : 'books';
+}
+
+function showView() {
+  const view = currentView();
+  for (const name of VIEWS) {
+    $(`#view-${name}`).hidden = name !== view;
+    const link = $(`[data-nav="${name}"]`);
+    if (name === view) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  document.title = view === 'meals' ? 'Meals · Shelf' : 'Shelf';
+  if (view === 'meals') meals.render();
+}
+
+window.addEventListener('hashchange', () => {
+  showView();
+  window.scrollTo(0, 0);
+});
+
 // ---------------------------------------------------------------- helpers
 
 const getItem = (id) => state.items.find((i) => i.id === id);
 const findBySource = (source) =>
   source && state.items.find((i) => i.source?.name === source.name && i.source?.id === source.id);
 const byDesc = (key) => (a, b) => (b[key] || '').localeCompare(a[key] || '');
-
-function formatDate(value) {
-  if (!value) return '';
-  const [y, m, d] = value.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
 
 function progressPct(item) {
   if (!item.pages) return 0;
@@ -159,6 +180,7 @@ function renderCurrent() {
   setHTML(el, html`
     <div class="section-head">
       <h2 id="current-heading">${T.currentHeading}</h2>
+      <button type="button" class="btn primary" data-action="open-add"><span aria-hidden="true">+</span> Add book</button>
     </div>
     ${reading.length
       ? html`<div class="current-grid">${reading.map(currentCard)}</div>`
@@ -214,9 +236,9 @@ function summary() {
   const read = state.items.filter((i) => i.status === 'done');
   if (!read.length) return '';
   const year = String(new Date().getFullYear());
-  const thisYear = read.filter((i) => i.finishedAt.startsWith(year)).length;
-  const pages = read.filter((i) => i.finishedAt.startsWith(year)).reduce((sum, i) => sum + (i.pages || 0), 0);
-  return html`<strong>${thisYear}</strong> read in ${year}${pages ? html` · <strong>${pages.toLocaleString()}</strong> pages` : ''}`;
+  const thisYear = read.filter((i) => i.finishedAt.startsWith(year));
+  const pages = thisYear.reduce((sum, i) => sum + (i.pages || 0), 0);
+  return html`<strong>${thisYear.length}</strong> read in ${year}${pages ? html` · <strong>${pages.toLocaleString()}</strong> pages` : ''}`;
 }
 
 function emptyMessage() {
@@ -339,7 +361,7 @@ function progressFields(item) {
 function dateFields(item) {
   const started = html`<label class="date-field">Started <input type="date" data-field="startedAt" value="${item.startedAt}"></label>`;
   const ended = (label) => html`<label class="date-field">${label} <input type="date" data-field="finishedAt" value="${item.finishedAt}"></label>`;
-  if (item.status === 'want') return html`<p class="hint">Added ${new Date(item.addedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p>`;
+  if (item.status === 'want') return html`<p class="hint">Added ${formatDate(item.addedAt)}</p>`;
   if (item.status === 'doing') return html`<div class="field dates">${started}</div>`;
   return html`<div class="field dates">${started}${ended(item.status === 'done' ? 'Finished' : 'Stopped')}</div>`;
 }
@@ -481,14 +503,17 @@ $('#manual-form').addEventListener('submit', (e) => {
 
 // ---------------------------------------------------------------- menu: export / import
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
 function openMenu() {
-  const n = state.items.length;
-  $('#menu-count').textContent = `${n} ${n === 1 ? T.noun : T.nounPlural} on your shelf.`;
+  const plans = meals.planCount();
+  $('#menu-count').textContent = `${plural(state.items.length, T.noun, T.nounPlural)} and ${plural(plans, 'meal plan', 'meal plans')} on this device.`;
   if (!menuDialog.open) menuDialog.showModal();
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const backup = { ...state, meals: meals.exportData() };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -503,60 +528,33 @@ $('#import-file').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file) return;
-  let incoming;
+  let raw;
   try {
-    incoming = store.normalize(JSON.parse(await file.text()));
+    raw = JSON.parse(await file.text());
   } catch {
-    incoming = null;
+    raw = null;
   }
-  if (!incoming?.items.length) {
+  const incoming = store.normalize(raw);
+  const hasMeals = Array.isArray(raw?.meals?.plans) || Array.isArray(raw?.meals?.shops);
+  if (!incoming.items.length && !hasMeals) {
     toast("That file doesn't look like a Shelf backup.");
     return;
   }
-  const result = store.merge(state, incoming);
-  state = result.state;
+  const books = store.merge(state, incoming);
+  state = books.state;
   persist();
+  const mealCounts = hasMeals ? meals.importData(raw.meals) : { plans: 0, shops: 0 };
   menuDialog.close();
-  toast(`Imported ${result.added} new and ${result.updated} updated ${T.nounPlural}`);
+  const parts = [`${books.added} new and ${books.updated} updated ${T.nounPlural}`];
+  if (mealCounts.plans || mealCounts.shops) parts.push(`${plural(mealCounts.plans, 'meal plan', 'meal plans')}, ${plural(mealCounts.shops, 'shop', 'shops')}`);
+  toast(`Imported ${parts.join('; ')}`);
 });
 
-// ---------------------------------------------------------------- toast
+// ---------------------------------------------------------------- events
 
-const toastEl = $('#toast');
-let toastTimer;
-let toastAction = null;
-const supportsPopover = typeof toastEl.showPopover === 'function';
-
-function toast(message, action) {
-  setHTML(toastEl, html`<span class="toast-msg">${message}</span>${action && html`<button type="button" class="toast-btn" data-action="toast-action">${action.label}</button>`}`);
-  toastAction = action?.run ?? null;
-  if (supportsPopover) {
-    // Re-showing moves it above any dialog that opened since.
-    if (toastEl.matches(':popover-open')) toastEl.hidePopover();
-    toastEl.showPopover();
-  } else {
-    toastEl.classList.add('show');
-  }
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, action ? 6000 : 3500);
-}
-
-function hideToast() {
-  clearTimeout(toastTimer);
-  toastAction = null;
-  if (supportsPopover) {
-    if (toastEl.matches(':popover-open')) toastEl.hidePopover();
-  } else {
-    toastEl.classList.remove('show');
-  }
-}
-
-// ---------------------------------------------------------------- global events
-
-const actions = {
+Object.assign(actions, {
   'open-add': openAdd,
   'open-menu': openMenu,
-  'close-dialog': (el) => el.closest('dialog')?.close(),
   tab: (el) => {
     ui.tab = el.dataset.tab;
     store.savePref('tab', ui.tab);
@@ -574,19 +572,11 @@ const actions = {
   },
   export: exportData,
   import: () => $('#import-file').click(),
-  'toast-action': () => {
-    const run = toastAction;
-    hideToast();
-    run?.();
-  },
-};
+});
 
+// Book cards and rows open the book (buttons inside them have their own actions).
 document.addEventListener('click', (e) => {
-  const actionEl = e.target.closest('[data-action]');
-  if (actionEl && actions[actionEl.dataset.action]) {
-    actions[actionEl.dataset.action](actionEl, e);
-    return;
-  }
+  if (e.target.closest('[data-action]')) return;
   const openEl = e.target.closest('[data-open]');
   if (openEl) openItem(openEl.dataset.open);
 });
@@ -599,17 +589,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Close dialogs when clicking the backdrop (but not when a drag ends there).
-for (const dialog of document.querySelectorAll('dialog')) {
-  let downOnBackdrop = false;
-  dialog.addEventListener('pointerdown', (e) => {
-    downOnBackdrop = e.target === dialog;
-  });
-  dialog.addEventListener('click', (e) => {
-    if (downOnBackdrop && e.target === dialog) dialog.close();
-    downOnBackdrop = false;
-  });
-}
+for (const dialog of document.querySelectorAll('dialog')) enableBackdropClose(dialog);
 
 // Covers that fail to load are swapped for the lettered placeholder.
 document.addEventListener(
@@ -638,3 +618,4 @@ window.addEventListener('storage', (e) => {
 });
 
 render();
+showView();
